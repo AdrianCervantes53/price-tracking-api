@@ -84,3 +84,14 @@ async def test_login_token_is_usable_on_protected_route(client: AsyncClient):
     )
     # GET /products está en 501 — pero si llegamos a 501, el token fue válido (no 401)
     assert response.status_code != 401
+
+
+async def test_register_accepts_password_longer_than_72_bytes(client: AsyncClient):
+    long_password = "a" * 100
+    payload = {"email": "longpw@example.com", "password": long_password}
+
+    response = await client.post("/auth/register", json=payload)
+    assert response.status_code == 201
+
+    login_response = await client.post("/auth/login", json=payload)
+    assert login_response.status_code == 200
