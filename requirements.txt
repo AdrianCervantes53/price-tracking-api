@@ -15,6 +15,9 @@ httpx==0.27.0
 # Auth
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# passlib 1.7.4 is not compatible with bcrypt 5.x (breaks backend detection and
+# can trigger the 72-byte bcrypt password limit even for short passwords).
+bcrypt<5
 
 # Config
 pydantic-settings==2.2.1
