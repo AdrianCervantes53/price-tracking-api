@@ -1,24 +1,9 @@
 from fastapi import APIRouter, status
-from pydantic import BaseModel, EmailStr
 
 from app.services import auth_service
+from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 
 router = APIRouter()
-
-
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
 
 
 @router.post(

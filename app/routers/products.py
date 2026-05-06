@@ -1,28 +1,10 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
 
 from app.core.dependencies import get_current_user
 from app.models.user import User
+from app.schemas.products import ProductResponse, RegisterProductRequest
 
 router = APIRouter()
-
-
-class RegisterProductRequest(BaseModel):
-    external_id: str
-    source: str
-
-
-class ProductResponse(BaseModel):
-    id: str
-    external_id: str
-    source: str
-    name: str
-    current_price: float
-    currency: str
-    availability: bool
-    last_checked: datetime
 
 
 @router.post(
