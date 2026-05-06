@@ -3,8 +3,22 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.products import ProductResponse, RegisterProductRequest
+from app.services import product_service
 
 router = APIRouter()
+
+
+def _to_response(product) -> ProductResponse:
+    return ProductResponse(
+        id=str(product.id),
+        external_id=product.external_id,
+        source=product.source,
+        name=product.name,
+        current_price=product.current_price,
+        currency=product.currency,
+        availability=product.availability,
+        last_checked=product.last_checked,
+    )
 
 
 @router.post(
@@ -17,7 +31,12 @@ async def register_product(
     body: RegisterProductRequest,
     current_user: User = Depends(get_current_user),
 ):
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED)
+    product = await product_service.register_product(
+        user_id=str(current_user.id),
+        external_id=body.external_id,
+        source=body.source,
+    )
+    return _to_response(product)
 
 
 @router.get(
@@ -26,7 +45,8 @@ async def register_product(
     summary="List products the current user is subscribed to",
 )
 async def list_products(current_user: User = Depends(get_current_user)):
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED)
+    products = await product_service.list_products(user_id=str(current_user.id))
+    return [_to_response(p) for p in products]
 
 
 @router.get(
@@ -50,4 +70,7 @@ async def delete_subscription(
     product_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED)
+    await product_service.unsubscribe(
+        user_id=str(current_user.id),
+        product_id=product_id,
+    )
