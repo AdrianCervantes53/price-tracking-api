@@ -1,17 +1,10 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
 
 from app.core.dependencies import get_current_user
 from app.models.user import User
+from app.schemas.prices import PriceHistoryEntry
 
 router = APIRouter()
-
-
-class PriceHistoryEntry(BaseModel):
-    price: float
-    timestamp: datetime
 
 
 @router.get(

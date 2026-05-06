@@ -1,18 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.dependencies import get_current_user
 from app.models.user import User
+from app.schemas.search import ExternalProductResult
 
 router = APIRouter()
-
-
-class ExternalProductResult(BaseModel):
-    external_id: str
-    source: str
-    name: str
-    price: float
-    currency: str
 
 
 @router.get(
