@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from app.core.dependencies import get_current_user
 from app.models.user import User
@@ -58,7 +58,11 @@ async def get_product(
     product_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED)
+    product = await product_service.get_product(
+        user_id=str(current_user.id),
+        product_id=product_id,
+    )
+    return _to_response(product)
 
 
 @router.delete(
