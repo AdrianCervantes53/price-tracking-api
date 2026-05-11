@@ -1,3 +1,4 @@
+from bson.errors import InvalidId
 from fastapi import HTTPException, status
 
 from app.external_clients.fake_store_client import FakeStoreClient
@@ -10,6 +11,36 @@ _client = FakeStoreClient()
 _product_repo = ProductRepository()
 _sub_repo = SubscriptionRepository()
 _price_history_repo = PriceHistoryRepository()
+
+
+async def get_product(user_id: str, product_id: str) -> Product:
+    """
+    Returns the product if the user has an active subscription.
+    Raises HTTP 404 in all failure cases — invalid ID, product not found,
+    or no active subscription — to avoid revealing whether a product exists.
+    """
+    try:
+        product = await _product_repo.get_by_id(product_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    subscription = await _sub_repo.get_by_user_and_product(user_id, str(product.id))
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    return product
 
 
 async def register_product(user_id: str, external_id: str, source: str) -> Product:
