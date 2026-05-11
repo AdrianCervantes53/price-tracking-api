@@ -1,11 +1,12 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
 
 class RegisterProductRequest(BaseModel):
     external_id: str
-    source: str
+    source: Literal["fakestore"] = "fakestore"
 
 
 class ProductResponse(BaseModel):
@@ -17,4 +18,3 @@ class ProductResponse(BaseModel):
     currency: str
     availability: bool
     last_checked: datetime
-
