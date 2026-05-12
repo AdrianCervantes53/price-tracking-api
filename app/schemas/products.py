@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 class RegisterProductRequest(BaseModel):
     external_id: str
-    source: Literal["fakestore"] = "fakestore"
+    source: Literal["fakestore", "mercadolibre"] = "fakestore"
 
 
 class ProductResponse(BaseModel):
