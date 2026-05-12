@@ -1,3 +1,4 @@
+from app.external_clients import get_client
 from app.models.price_history import PriceHistory
 from app.models.product import Product
 from app.repositories.price_history_repository import PriceHistoryRepository
@@ -19,14 +20,14 @@ async def get_history(user_id: str, product_id: str) -> list[PriceHistory]:
 
 async def refresh(user_id: str, product_id: str) -> Product:
     """
-    Fetches the current price from the external API, updates the product document,
-    and records a new PriceHistory snapshot regardless of whether the price changed.
+    Fetches the current price from the external API using the product's source,
+    updates the product document, and records a new PriceHistory snapshot
+    regardless of whether the price changed.
     Raises HTTP 404 if the product does not exist or the user is not subscribed.
     """
     product = await product_service.get_product(user_id, product_id)
 
-    from app.external_clients.fake_store_client import FakeStoreClient
-    client = FakeStoreClient()
+    client = get_client(product.source)
     external_data = await client.get_product(product.external_id)
 
     updated_product = await _product_repo.update_price(product, external_data.price)
