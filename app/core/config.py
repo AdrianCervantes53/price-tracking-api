@@ -11,5 +11,7 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
+    ml_site_id: str = "MLM"
+
 
 settings = Settings()
