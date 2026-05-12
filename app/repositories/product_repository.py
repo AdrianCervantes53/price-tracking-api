@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from app.models.product import Product
 
 
@@ -36,3 +38,10 @@ class ProductRepository:
         )
         await product.insert()
         return product, True
+
+    async def update_price(self, product: Product, new_price: float) -> Product:
+        """Updates current_price and last_checked on an existing product document."""
+        product.current_price = new_price
+        product.last_checked = datetime.now(timezone.utc)
+        await product.save()
+        return product
