@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import get_current_user
@@ -15,6 +17,9 @@ router = APIRouter()
 )
 async def search_products(
     q: str = Query(..., min_length=1, description="Search term"),
+    source: Literal["fakestore", "mercadolibre"] = Query(
+        "fakestore", description="Marketplace to search"
+    ),
     current_user: User = Depends(get_current_user),
 ):
-    return await search_service.search_products(q)
+    return await search_service.search_products(q, source)
