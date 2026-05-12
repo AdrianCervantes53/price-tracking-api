@@ -1,13 +1,12 @@
 from bson.errors import InvalidId
 from fastapi import HTTPException, status
 
-from app.external_clients.fake_store_client import FakeStoreClient
+from app.external_clients import get_client
 from app.models.product import Product
 from app.repositories.price_history_repository import PriceHistoryRepository
 from app.repositories.product_repository import ProductRepository
 from app.repositories.subscription_repository import SubscriptionRepository
 
-_client = FakeStoreClient()
 _product_repo = ProductRepository()
 _sub_repo = SubscriptionRepository()
 _price_history_repo = PriceHistoryRepository()
@@ -49,7 +48,7 @@ async def register_product(user_id: str, external_id: str, source: str) -> Produ
     for the authenticated user. If the product is new, records the first
     PriceHistory snapshot. Raises HTTP 409 if already subscribed.
     """
-    external_data = await _client.get_product(external_id)
+    external_data = await get_client(source).get_product(external_id)
 
     product, is_new = await _product_repo.upsert(
         external_id=external_id,
