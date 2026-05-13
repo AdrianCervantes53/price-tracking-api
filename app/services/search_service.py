@@ -1,8 +1,6 @@
-from app.external_clients.fake_store_client import FakeStoreClient
+from app.external_clients import get_client
 from app.schemas.search import ExternalProductResult
 
-_client = FakeStoreClient()
 
-
-async def search_products(q: str) -> list[ExternalProductResult]:
-    return await _client.search(q)
+async def search_products(q: str, source: str) -> list[ExternalProductResult]:
+    return await get_client(source).search(q)
