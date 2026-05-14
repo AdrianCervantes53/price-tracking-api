@@ -79,6 +79,8 @@ FinnhubClient.get_product("AAPL")
 
 **Finnhub Stock API** (`source=finnhub`) — Real-time and end-of-day stock prices. Free tier provides 60 requests/minute. Prices change continuously during NYSE/NASDAQ market hours (Mon–Fri, 09:30–16:00 ET). Get a free API key at [finnhub.io](https://finnhub.io).
 
+> **Deployment note:** Finnhub's Terms of Service prohibit redistribution of data or derived results to third parties without written approval. This project is intended for **individual use with a personal API key** — it is not designed for public multi-tenant deployment where end users would consume Finnhub data without their own account. This is a deliberate, documented constraint, not an oversight.
+
 ### Why stocks instead of a marketplace?
 
 The original goal was to track product prices from a real marketplace. During evaluation, several candidates were ruled out for different reasons:
@@ -170,6 +172,8 @@ Every call to `POST /products/{id}/refresh` records a new `PriceHistory` entry r
 ## Running Locally
 
 **Requirements:** Docker, Docker Compose, a free [Finnhub API key](https://finnhub.io).
+
+> **Note:** Finnhub's ToS prohibit redistribution of data to third parties. Set `FINNHUB_API_KEY` to your own personal key. This project is not intended for public multi-tenant deployment.
 
 ```bash
 cp .env.example .env
