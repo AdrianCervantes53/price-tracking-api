@@ -75,13 +75,21 @@ FinnhubClient.get_product("AAPL")
 
 ### Active sources
 
-**FakeStore API** (`source=fakestore`) — Static product catalog with no authentication. Useful for local development and demos where real market data is not needed.
+**FakeStore API** (`source=fakestore`) — Static product catalog with no authentication. Used as the initial data source to validate the full architecture (upsert, subscriptions, price history, refresh) before integrating a real external API.
 
 **Finnhub Stock API** (`source=finnhub`) — Real-time and end-of-day stock prices. Free tier provides 60 requests/minute. Prices change continuously during NYSE/NASDAQ market hours (Mon–Fri, 09:30–16:00 ET). Get a free API key at [finnhub.io](https://finnhub.io).
 
-### Why not MercadoLibre?
+### Why stocks instead of a marketplace?
 
-`MercadoLibreClient` is implemented and its tests pass, but MercadoLibre restricted public access to their search and item endpoints in 2024–2025 — both return `403 Forbidden` regardless of headers or credentials. The client is retained in the codebase as a reference implementation of the retry + adapter pattern, but `source=mercadolibre` is not exposed in the public API.
+The original goal was to track product prices from a real marketplace. During evaluation, several candidates were ruled out for different reasons:
+
+- **MercadoLibre** — client fully implemented, but ML restricted public access to their search and item endpoints in 2024–2025; both return `403 Forbidden` in production.
+- **eBay Browse API** and **Best Buy API** — functional public search, but their Terms of Service explicitly prohibit price tracking use cases.
+- **Amazon** — no public API; third-party wrappers are too rate-limited for a tracker (Canopy free tier: 100 requests/month).
+
+Stock prices through Finnhub turned out to be a better fit: genuinely public data by regulation, permissive ToS for informational use, a generous free tier, and prices that change continuously during market hours — making the price history feature actually meaningful rather than demonstrative. The domain shift required zero model changes; `external_id` became a ticker symbol (`AAPL`) instead of a product ID, and everything else stayed the same.
+
+`MercadoLibreClient` is retained in the codebase as a reference implementation of the retry + adapter pattern. Its tests pass because the HTTP layer is mocked with `respx`, but `source=mercadolibre` is not exposed in the public API.
 
 ---
 
