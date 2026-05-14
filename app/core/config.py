@@ -11,7 +11,11 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
+    # MercadoLibre — kept for reference; source is deprecated (API returns 403)
     ml_site_id: str = "MLM"
+
+    # Finnhub Stock API
+    finnhub_api_key: str
 
 
 settings = Settings()

@@ -17,8 +17,8 @@ router = APIRouter()
 )
 async def search_products(
     q: str = Query(..., min_length=1, description="Search term"),
-    source: Literal["fakestore", "mercadolibre"] = Query(
-        "fakestore", description="Marketplace to search"
+    source: Literal["fakestore", "finnhub"] = Query(
+        "fakestore", description="Data source to search (fakestore | finnhub)"
     ),
     current_user: User = Depends(get_current_user),
 ):
