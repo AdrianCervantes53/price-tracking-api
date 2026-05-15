@@ -8,13 +8,14 @@ Built to demonstrate **layered backend architecture**, **external API integratio
 
 ## Technical Highlights
 
-- **Multi-source architecture** — `FakeStoreClient` and `FinnhubClient` share a common interface; a factory (`get_client(source)`) routes operations to the correct client. Adding a new source requires one new client class and one factory entry.
-- **Concurrent external calls** — `FinnhubClient` fetches prices for multiple symbols in parallel using `asyncio.gather`, and makes quote + search calls concurrently in `get_product` to minimize latency.
+- **Multi-source architecture** — `FakeStoreClient` and `CoinGeckoClient` share a common interface; a factory (`get_client(source)`) routes operations to the correct client. Adding a new source requires one new client class and one factory entry.
+- **Batched price fetching** — `CoinGeckoClient.search` retrieves prices for all results in a single call using CoinGecko's batched `/simple/price` endpoint, rather than N concurrent quote calls.
+- **Concurrent external calls** — `CoinGeckoClient.get_product` makes two requests concurrently via `asyncio.gather`: one for the price and one for the coin metadata.
 - **Retry with exponential backoff** — `with_retry` is a reusable async utility that retries on `5xx` and `TimeoutException`, and respects `Retry-After` on `429`. Decoupled from any specific client.
 - **Global product model** — `Product` documents are shared across all subscribers. The `Subscription` collection models the user↔product relationship. Deleting a subscription never removes price history.
 - **Upsert by compound key** — `POST /products` upserts on `(external_id, source)` with a unique MongoDB index, preventing duplicates even under concurrent requests.
 - **Security-conscious error handling** — The subscription guard returns `404` in all failure cases (invalid ID, product not found, no subscription) to avoid revealing whether a product exists.
-- **~56 integration and unit tests** — HTTP layer mocked with `respx`, database with `mongomock-motor`. Covers happy paths, error propagation, retry behavior, market-closed price fallback, and data isolation between users.
+- **~68 integration and unit tests** — HTTP layer mocked with `respx`, database with `mongomock-motor`. Covers happy paths, error propagation, retry behavior, price-unchanged snapshots, and data isolation between users.
 
 ---
 
@@ -56,17 +57,18 @@ Router → product_service.register_product()
            └── price_history_repo.create_snapshot()          # first snapshot if new
 ```
 
-### FinnhubClient — concurrent call pattern
+### CoinGeckoClient — batched search + concurrent get_product
 
-`get_product` makes two requests concurrently to minimize latency: `/quote` for the current price and `/search` to resolve the company name. `search` fetches quotes for up to five symbols in parallel using `asyncio.gather`.
+`search` fetches prices for all results in **one** batched call to `/simple/price`, avoiding N sequential or concurrent quote requests. `get_product` makes two concurrent calls to minimize latency.
 
 ```
-FinnhubClient.get_product("AAPL")
-   ├── GET /quote?symbol=AAPL   ─┐  (concurrent via asyncio.gather)
-   └── GET /search?q=AAPL       ─┘
-           └── _resolve_name()  # exact symbol match → "Apple Inc"
-           └── _to_schema()     # c > 0 → use real-time price
-                                # c == 0 → fall back to previous close (pc)
+CoinGeckoClient.search("bitcoin")
+   ├── GET /search?query=bitcoin        # returns coin ids + names
+   └── GET /simple/price?ids=a,b,c,...  # one batched call for all prices
+
+CoinGeckoClient.get_product("bitcoin")
+   ├── GET /simple/price?ids=bitcoin  ─┐  (concurrent via asyncio.gather)
+   └── GET /coins/bitcoin              ─┘
 ```
 
 ---
@@ -77,21 +79,29 @@ FinnhubClient.get_product("AAPL")
 
 **FakeStore API** (`source=fakestore`) — Static product catalog with no authentication. Used as the initial data source to validate the full architecture (upsert, subscriptions, price history, refresh) before integrating a real external API.
 
-**Finnhub Stock API** (`source=finnhub`) — Real-time and end-of-day stock prices. Free tier provides 60 requests/minute. Prices change continuously during NYSE/NASDAQ market hours (Mon–Fri, 09:30–16:00 ET). Get a free API key at [finnhub.io](https://finnhub.io).
+**CoinGecko API** (`source=coingecko`) — Real-time cryptocurrency prices. Free Demo tier provides 30 calls/minute with a monthly cap of 10,000 calls. Prices change 24/7 with no market-hours restriction, making the price history feature genuinely meaningful at any time of day. Get a free Demo key at [coingecko.com/en/api](https://www.coingecko.com/en/api).
 
-> **Deployment note:** Finnhub's Terms of Service prohibit redistribution of data or derived results to third parties without written approval. This project is intended for **individual use with a personal API key** — it is not designed for public multi-tenant deployment where end users would consume Finnhub data without their own account. This is a deliberate, documented constraint, not an oversight.
+The `external_id` for CoinGecko is the coin's slug (e.g. `bitcoin`, `ethereum`), not the ticker symbol. The search endpoint returns the slug so users can copy it directly into `POST /products`.
 
-### Why stocks instead of a marketplace?
+> **ToS note:** CoinGecko's Terms of Service permit building applications that display and charge for services using CoinGecko data. The restriction is on sub-licensing or reselling API access itself — not on serving coin prices to end users. This project can be deployed publicly without the ToS constraints that apply to Finnhub.
 
-The original goal was to track product prices from a real marketplace. During evaluation, several candidates were ruled out for different reasons:
+### Reference implementations (not exposed in public API)
 
-- **MercadoLibre** — client fully implemented, but ML restricted public access to their search and item endpoints in 2024–2025; both return `403 Forbidden` in production.
-- **eBay Browse API** and **Best Buy API** — functional public search, but their Terms of Service explicitly prohibit price tracking use cases.
-- **Amazon** — no public API; third-party wrappers are too rate-limited for a tracker (Canopy free tier: 100 requests/month).
+**Finnhub Stock API** — `FinnhubClient` is retained in the codebase as a reference implementation of the concurrent-calls pattern (`asyncio.gather` for quote + search) and the price-fallback strategy (previous close when market is closed). Its tests pass with `respx` mocks. Not exposed as `source=finnhub` because Finnhub's ToS prohibit redistribution of data to third parties without written approval.
 
-Stock prices through Finnhub turned out to be a better fit: genuinely public data by regulation, permissive ToS for informational use, a generous free tier, and prices that change continuously during market hours — making the price history feature actually meaningful rather than demonstrative. The domain shift required zero model changes; `external_id` became a ticker symbol (`AAPL`) instead of a product ID, and everything else stayed the same.
+**MercadoLibre API** — `MercadoLibreClient` is retained as a reference implementation of the retry + adapter pattern. Not exposed because ML restricted public access to their search and item endpoints in 2024–2025; both return `403 Forbidden` in production.
 
-`MercadoLibreClient` is retained in the codebase as a reference implementation of the retry + adapter pattern. Its tests pass because the HTTP layer is mocked with `respx`, but `source=mercadolibre` is not exposed in the public API.
+### Why crypto instead of stocks or a marketplace?
+
+The original goal was to track product prices from a real marketplace. During evaluation, several candidates were ruled out:
+
+- **MercadoLibre** — client implemented, but API returns `403` on all public endpoints since 2024–2025.
+- **eBay Browse API** and **Best Buy API** — ToS explicitly prohibit price tracking use cases.
+- **Amazon** — no public API.
+- **Finnhub** — functional and well-documented, but ToS prohibit redistribution of data to third parties.
+- **Steam** — no official search endpoint; game prices are static outside of seasonal sales.
+
+CoinGecko turned out to be the best fit: permissive ToS for application use, a generous free tier, an official search endpoint, and prices that change continuously 24/7 — making the price history feature meaningful without any market-hours constraint. The domain shift required zero model changes; `external_id` became a coin slug (`bitcoin`) instead of a product ID, and everything else stayed the same.
 
 ---
 
@@ -103,7 +113,7 @@ All endpoints except `/auth/*` require `Authorization: Bearer <token>`.
 |--------|------|------|-------------|
 | `POST` | `/auth/register` | No | Register a new user |
 | `POST` | `/auth/login` | No | Login — returns JWT |
-| `GET` | `/search?q={term}&source={source}` | Yes | Search assets (`source`: `fakestore` \| `finnhub`, default `fakestore`) |
+| `GET` | `/search?q={term}&source={source}` | Yes | Search assets (`source`: `fakestore` \| `coingecko`, default `fakestore`) |
 | `POST` | `/products` | Yes | Subscribe to an asset (upsert + subscription) |
 | `GET` | `/products` | Yes | List assets the authenticated user is subscribed to |
 | `GET` | `/products/{id}` | Yes | Asset detail — requires active subscription |
@@ -123,15 +133,15 @@ TOKEN=$(curl -s -X POST localhost:8000/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "user@example.com", "password": "secret123"}' | jq -r .access_token)
 
-# 2. Search stocks on Finnhub
-curl "localhost:8000/search?q=apple&source=finnhub" \
+# 2. Search cryptocurrencies on CoinGecko
+curl "localhost:8000/search?q=bitcoin&source=coingecko" \
   -H "Authorization: Bearer $TOKEN"
 
-# 3. Subscribe to a stock
+# 3. Subscribe to a coin (use the slug from search results as external_id)
 curl -s -X POST localhost:8000/products \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"external_id": "AAPL", "source": "finnhub"}'
+  -d '{"external_id": "bitcoin", "source": "coingecko"}'
 
 # 4. Check price history
 curl "localhost:8000/products/{id}/history" \
@@ -153,13 +163,13 @@ A `Product` document is shared across all subscribers. The `Subscription` collec
 `GET /search` queries the external API and returns candidates without persisting anything. `POST /products` then performs the upsert and creates the subscription. This gives the user explicit control over what they track, and keeps the search endpoint read-only and stateless.
 
 **Adapter layer decouples external contracts from the domain model.**
-Each client (`FakeStoreClient`, `FinnhubClient`) has a `_to_schema` method that maps the external response to the internal `ExternalProductResult`. The rest of the application never sees raw external API data. Adding a new source means implementing one class with two methods (`search`, `get_product`) — nothing else changes.
+Each client (`FakeStoreClient`, `CoinGeckoClient`) has a `_to_schema` method that maps the external response to the internal `ExternalProductResult`. The rest of the application never sees raw external API data. Adding a new source means implementing one class with two methods (`search`, `get_product`) — nothing else changes.
+
+**Batched price fetching over N concurrent calls.**
+CoinGecko's `/simple/price` endpoint accepts a comma-separated list of coin ids, returning all prices in a single response. `CoinGeckoClient.search` uses this to replace the N concurrent quote calls that `FinnhubClient` required, reducing both latency and rate-limit consumption.
 
 **Retry is a reusable utility, not client logic.**
-`with_retry(request_func, max_retries, base_delay)` is a standalone async function. It retries on `5xx` and `TimeoutException` with exponential backoff, and respects `Retry-After` on `429`. Both `FinnhubClient` and `MercadoLibreClient` use it independently; `FakeStoreClient` opts out. Any future client can opt in.
-
-**Price fallback for closed markets.**
-When the Finnhub market is closed, the `/quote` endpoint returns `c=0`. `FinnhubClient._to_schema` falls back to `pc` (previous close) in that case, so subscribers always see the most recent meaningful price rather than zero.
+`with_retry(request_func, max_retries, base_delay)` is a standalone async function. It retries on `5xx` and `TimeoutException` with exponential backoff, and respects `Retry-After` on `429`. `CoinGeckoClient` and `MercadoLibreClient` use it; `FakeStoreClient` opts out. Any future client can opt in.
 
 **404 in all subscription guard failures.**
 `get_product(user_id, product_id)` returns `404` whether the ID is invalid, the product doesn't exist, or the user isn't subscribed. Returning `403` on a missing subscription would reveal that the product exists — a minor but deliberate security choice.
@@ -167,17 +177,19 @@ When the Finnhub market is closed, the `/quote` endpoint returns `c=0`. `Finnhub
 **Refresh always creates a snapshot.**
 Every call to `POST /products/{id}/refresh` records a new `PriceHistory` entry regardless of whether the price changed. The history is an audit trail of when prices were verified, not just when they changed.
 
+**Source selection is ToS-aware by design.**
+The public `source` field accepts only `fakestore` and `coingecko`. `FinnhubClient` and `MercadoLibreClient` are retained in the codebase as reference implementations — their tests pass, but they are not reachable through the public API. This is a deliberate architectural decision documented here and in the factory, not an oversight.
+
 ---
 
 ## Running Locally
 
-**Requirements:** Docker, Docker Compose, a free [Finnhub API key](https://finnhub.io).
-
-> **Note:** Finnhub's ToS prohibit redistribution of data to third parties. Set `FINNHUB_API_KEY` to your own personal key. This project is not intended for public multi-tenant deployment.
+**Requirements:** Docker, Docker Compose. No API key required to run the app — CoinGecko works without one, though a free Demo key improves rate limit stability.
 
 ```bash
 cp .env.example .env
-# Set SECRET_KEY and FINNHUB_API_KEY in .env
+# Set SECRET_KEY in .env
+# Optionally set COINGECKO_API_KEY for stable 30 req/min (free at coingecko.com/en/api)
 
 docker compose up
 ```
