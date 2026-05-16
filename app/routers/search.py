@@ -13,13 +13,13 @@ router = APIRouter()
 @router.get(
     "",
     response_model=list[ExternalProductResult],
-    summary="Search products in external marketplace (results not persisted)",
+    summary="Search assets in external data source (results not persisted)",
 )
 async def search_products(
     q: str = Query(..., min_length=1, description="Search term"),
-    source: Literal["fakestore", "finnhub", "mercadolibre"] = Query(
+    source: Literal["fakestore", "coingecko"] = Query(
         "fakestore",
-        description="Data source to search (fakestore | finnhub | mercadolibre)",
+        description="Data source to search (fakestore | coingecko)",
     ),
     current_user: User = Depends(get_current_user),
 ):
