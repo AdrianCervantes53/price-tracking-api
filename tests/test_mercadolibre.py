@@ -1,13 +1,14 @@
 """
-Tests for MercadoLibre integration:
-  - Unit tests for with_retry behavior
-  - Unit tests for MercadoLibreClient._to_schema adapter
-  - Integration tests for GET /search?source=mercadolibre
-  - Integration tests for POST /products with source=mercadolibre
-  - Integration tests for refresh on a ML product
+Tests for MercadoLibre integration — reference implementation.
+
+MercadoLibreClient is retained in the codebase as a reference for the retry +
+adapter pattern. It is not exposed in the public API because ML restricted
+public access to their search and item endpoints in 2024–2025 (403 Forbidden).
+
+These tests verify the client logic directly, bypassing the HTTP router layer,
+since source=mercadolibre is no longer a valid value in the public API Literal.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -16,9 +17,6 @@ import respx
 
 from app.external_clients.mercadolibre_client import MercadoLibreClient
 from app.external_clients.retry import with_retry
-from app.models.price_history import PriceHistory
-from app.models.product import Product
-from app.models.subscription import Subscription
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -44,23 +42,7 @@ ML_ITEM_2 = {
     "thumbnail": "https://http2.mlstatic.com/img2.jpg",
 }
 
-ML_ITEM_1_NEW_PRICE = {**ML_ITEM_1, "price": 999.0}
-
 ML_SEARCH_RESPONSE = {"results": [ML_ITEM_1, ML_ITEM_2]}
-
-
-@pytest.fixture
-async def auth_headers(client):
-    await client.post(
-        "/auth/register",
-        json={"email": "ml@example.com", "password": "securepassword"},
-    )
-    response = await client.post(
-        "/auth/login",
-        json={"email": "ml@example.com", "password": "securepassword"},
-    )
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +113,7 @@ async def test_retry_respects_retry_after_header_on_429():
         return r
 
     sleep_calls = []
+
     async def fake_sleep(seconds):
         sleep_calls.append(seconds)
 
@@ -142,7 +125,7 @@ async def test_retry_respects_retry_after_header_on_429():
 
 
 # ---------------------------------------------------------------------------
-# Unit tests — MercadoLibreClient adapter
+# Unit tests — MercadoLibreClient._to_schema adapter
 # ---------------------------------------------------------------------------
 
 
@@ -162,122 +145,76 @@ def test_to_schema_handles_null_price():
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — GET /search?source=mercadolibre
+# Client-level tests — MercadoLibreClient.search()
 # ---------------------------------------------------------------------------
 
 
 @respx.mock
-async def test_search_ml_returns_results(client, auth_headers):
+async def test_search_returns_results():
     respx.get("https://api.mercadolibre.com/sites/MLM/search").mock(
         return_value=httpx.Response(200, json=ML_SEARCH_RESPONSE)
     )
-    response = await client.get(
-        "/search?q=mochila&source=mercadolibre", headers=auth_headers
-    )
 
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 2
-    assert data[0]["external_id"] == "MLM123456"
-    assert data[0]["source"] == "mercadolibre"
-    assert data[0]["currency"] == "MXN"
+    results = await MercadoLibreClient().search("mochila")
+
+    assert len(results) == 2
+    assert results[0].external_id == "MLM123456"
+    assert results[0].source == "mercadolibre"
+    assert results[0].currency == "MXN"
 
 
 @respx.mock
-async def test_search_ml_empty_results(client, auth_headers):
+async def test_search_returns_empty_list_when_no_results():
     respx.get("https://api.mercadolibre.com/sites/MLM/search").mock(
         return_value=httpx.Response(200, json={"results": []})
     )
-    response = await client.get(
-        "/search?q=noresults&source=mercadolibre", headers=auth_headers
-    )
 
-    assert response.status_code == 200
-    assert response.json() == []
+    results = await MercadoLibreClient().search("noresults")
+
+    assert results == []
 
 
 @respx.mock
-async def test_search_ml_timeout_returns_503(client, auth_headers):
+async def test_search_raises_503_on_timeout():
     respx.get("https://api.mercadolibre.com/sites/MLM/search").mock(
         side_effect=httpx.TimeoutException("timed out")
     )
-    response = await client.get(
-        "/search?q=mochila&source=mercadolibre", headers=auth_headers
-    )
-    assert response.status_code == 503
 
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc_info:
+        await MercadoLibreClient().search("mochila")
 
-async def test_search_invalid_source_returns_422(client, auth_headers):
-    response = await client.get(
-        "/search?q=test&source=unknown", headers=auth_headers
-    )
-    assert response.status_code == 422
+    assert exc_info.value.status_code == 503
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — POST /products with source=mercadolibre
+# Client-level tests — MercadoLibreClient.get_product()
 # ---------------------------------------------------------------------------
 
 
 @respx.mock
-async def test_register_ml_product_creates_documents(client, auth_headers):
+async def test_get_product_returns_correct_schema():
     respx.get("https://api.mercadolibre.com/items/MLM123456").mock(
         return_value=httpx.Response(200, json=ML_ITEM_1)
     )
-    response = await client.post(
-        "/products",
-        json={"external_id": "MLM123456", "source": "mercadolibre"},
-        headers=auth_headers,
-    )
 
-    assert response.status_code == 201
-    data = response.json()
-    assert data["external_id"] == "MLM123456"
-    assert data["source"] == "mercadolibre"
-    assert data["current_price"] == 1299.0
-    assert data["currency"] == "MXN"
-    assert await Product.find().count() == 1
-    assert await Subscription.find().count() == 1
-    assert await PriceHistory.find().count() == 1
+    result = await MercadoLibreClient().get_product("MLM123456")
+
+    assert result.external_id == "MLM123456"
+    assert result.source == "mercadolibre"
+    assert result.name == "Mochila Fjallraven Kanken"
+    assert result.price == 1299.0
+    assert result.currency == "MXN"
 
 
 @respx.mock
-async def test_register_ml_product_not_found_returns_404(client, auth_headers):
+async def test_get_product_raises_404_when_not_found():
     respx.get("https://api.mercadolibre.com/items/MLM999999").mock(
         return_value=httpx.Response(404)
     )
-    response = await client.post(
-        "/products",
-        json={"external_id": "MLM999999", "source": "mercadolibre"},
-        headers=auth_headers,
-    )
-    assert response.status_code == 404
 
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc_info:
+        await MercadoLibreClient().get_product("MLM999999")
 
-# ---------------------------------------------------------------------------
-# Integration tests — refresh uses correct client for ML products
-# ---------------------------------------------------------------------------
-
-
-@respx.mock
-async def test_refresh_ml_product_uses_ml_client(client, auth_headers):
-    respx.get("https://api.mercadolibre.com/items/MLM123456").mock(
-        return_value=httpx.Response(200, json=ML_ITEM_1)
-    )
-    post_response = await client.post(
-        "/products",
-        json={"external_id": "MLM123456", "source": "mercadolibre"},
-        headers=auth_headers,
-    )
-    product_id = post_response.json()["id"]
-
-    respx.get("https://api.mercadolibre.com/items/MLM123456").mock(
-        return_value=httpx.Response(200, json=ML_ITEM_1_NEW_PRICE)
-    )
-    refresh_response = await client.post(
-        f"/products/{product_id}/refresh", headers=auth_headers
-    )
-
-    assert refresh_response.status_code == 200
-    assert refresh_response.json()["current_price"] == 999.0
-    assert await PriceHistory.find().count() == 2
+    assert exc_info.value.status_code == 404
